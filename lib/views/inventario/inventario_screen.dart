@@ -54,35 +54,45 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
 
   void _abrirModalProducto([Producto? productoExistente, bool esInsumoInicial = true]) async {
     const unidadesValidas = ['Unidad', 'Gramos', 'Kilos', 'Litros'];
+    const unidadesContenidoValidas = ['ml', 'L', 'cc', 'gr', 'kg', 'cm3'];
 
     final nombreCtrl = TextEditingController(text: productoExistente?.nombre ?? '');
+    final contenidoCtrl = TextEditingController(
+      text: productoExistente?.contenidoNeto != null 
+          ? ((productoExistente!.contenidoNeto! % 1 == 0)
+              ? productoExistente.contenidoNeto!.toInt().toString()
+              : productoExistente.contenidoNeto!.toString())
+          : '',
+    );
     final costoDirectoCtrl = TextEditingController(text: productoExistente?.precioCosto.toString() ?? '0');
     final ventaCtrl = TextEditingController(text: productoExistente?.precioVentaUnitario?.toString() ?? '');
     final stockCtrl = TextEditingController(text: productoExistente?.stockActual.toString() ?? '0');
     final cantidadInsumoCtrl = TextEditingController(text: '1');
-    final busquedaComponenteCtrl = TextEditingController();
 
     String unidadMedida = unidadesValidas.contains(productoExistente?.unidadMedida)
         ? productoExistente!.unidadMedida
         : 'Unidad';
 
+    String unidadContenido = unidadesContenidoValidas.contains(productoExistente?.unidadContenido)
+        ? productoExistente!.unidadContenido!
+        : 'ml';
+
     int? categoriaId = (_categorias.any((c) => c.id == productoExistente?.categoriaId))
         ? productoExistente!.categoriaId
         : (_categorias.isNotEmpty ? _categorias.first.id : null);
 
-    String filtroOrigen = 'TODOS';
     int? filtroCategoriaComponente;
-
-    bool esTipoCombo = productoExistente != null 
-        ? (productoExistente.esVendibleSolo && productoExistente.unidadMedida == 'Unidad')
-        : !esInsumoInicial;
-
-    bool esVendibleSolo = productoExistente?.esVendibleSolo ?? esTipoCombo;
 
     List<Receta> ingredientesReceta = [];
     if (productoExistente != null && productoExistente.id != null) {
       ingredientesReceta = await _recetasRepo.getRecetasPorProductoPadre(productoExistente.id!);
     }
+
+    bool esTipoCombo = productoExistente != null 
+        ? (ingredientesReceta.isNotEmpty)
+        : !esInsumoInicial;
+
+    bool esVendibleSolo = productoExistente?.esVendibleSolo ?? esTipoCombo;
 
     int? insumoAgregarId;
 
@@ -112,14 +122,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
             final componentesFiltrados = _todosLosProductos.where((p) {
               if (productoExistente != null && p.id == productoExistente.id) return false;
 
-              final bool esInsumoPuro = !p.esVendibleSolo || p.unidadMedida != 'Unidad';
-              if (filtroOrigen == 'INSUMOS' && !esInsumoPuro) return false;
-              if (filtroOrigen == 'BEBIDAS' && esInsumoPuro) return false;
-
               if (filtroCategoriaComponente != null && p.categoriaId != filtroCategoriaComponente) return false;
-
-              final busq = busquedaComponenteCtrl.text.trim().toLowerCase();
-              if (busq.isNotEmpty && !p.nombre.toLowerCase().contains(busq)) return false;
 
               return true;
             }).toList();
@@ -137,7 +140,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
             return AppCrudDialog(
               titulo: productoExistente == null 
                   ? (esTipoCombo ? 'Nuevo Producto / Combo' : 'Nuevo Insumo')
-                  : 'Editar: ${productoExistente.nombre}',
+                  : 'Editar: ${productoExistente.nombreConPresentacion}',
               icono: esTipoCombo ? Icons.lunch_dining : Icons.inventory_2,
               textoGuardar: productoExistente == null ? 'Guardar Ítem' : 'Guardar Cambios',
               maxWidth: 640,
@@ -145,7 +148,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                 final bool confirmar = await AppConfirmDialog.mostrar(
                   context,
                   titulo: 'Eliminar Ítem',
-                  mensaje: '¿Estás seguro de eliminar "${productoExistente.nombre}"? Si es un combo o insumo con recetas, sus asociaciones también se borrarán.',
+                  mensaje: '¿Estás seguro de eliminar "${productoExistente.nombreConPresentacion}"? Si es un combo o insumo con recetas, sus asociaciones también se borrarán.',
                 );
 
                 if (!confirmar) return;
@@ -158,7 +161,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('"${productoExistente.nombre}" fue eliminado correctamente.'),
+                    content: Text('"${productoExistente.nombreConPresentacion}" fue eliminado correctamente.'),
                     backgroundColor: AppColors.secondary,
                   ),
                 );
@@ -171,12 +174,15 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                 final costoFinal = (esTipoCombo && ingredientesReceta.isNotEmpty) ? costoTotalReceta : costoIngresado;
                 final precioVenta = esVendibleSolo ? (double.tryParse(ventaCtrl.text) ?? 0.0) : null;
                 final stock = double.tryParse(stockCtrl.text) ?? 0.0;
+                final contenidoVal = double.tryParse(contenidoCtrl.text.replaceAll(',', '.'));
 
                 final p = Producto(
                   id: productoExistente?.id,
                   categoriaId: categoriaSeleccionada,
                   nombre: nombre,
                   unidadMedida: esTipoCombo ? 'Unidad' : unidadMedida,
+                  contenidoNeto: contenidoVal,
+                  unidadContenido: contenidoVal != null ? unidadContenido : null,
                   precioCosto: costoFinal,
                   precioVentaUnitario: precioVenta,
                   stockActual: stock,
@@ -209,78 +215,106 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (productoExistente == null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: InkWell(
-                              onTap: () => setModalState(() {
-                                esTipoCombo = true;
-                                esVendibleSolo = true;
-                                unidadMedida = 'Unidad';
-                              }),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: esTipoCombo ? AppColors.primary : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '🍔 Combo / Elaborado',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: esTipoCombo ? Colors.black : AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: InkWell(
-                              onTap: () => setModalState(() {
-                                esTipoCombo = false;
-                                esVendibleSolo = false;
-                              }),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: !esTipoCombo ? AppColors.primary : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    '🥩 Insumo / Materia Prima',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: !esTipoCombo ? Colors.black : AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    const SizedBox(height: 16),
-                  ],
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setModalState(() {
+                              esTipoCombo = true;
+                              esVendibleSolo = true;
+                              unidadMedida = 'Unidad';
+                            }),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: esTipoCombo ? AppColors.primary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '🍔 Combo / Con Receta',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: esTipoCombo ? Colors.black : AppColors.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setModalState(() {
+                              esTipoCombo = false;
+                            }),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !esTipoCombo ? AppColors.primary : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  esVendibleSolo ? '🥤 Producto Simple / Directo' : '🥩 Insumo / Materia Prima',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: !esTipoCombo ? Colors.black : AppColors.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
                   TextField(
                     controller: nombreCtrl,
                     decoration: InputDecoration(
-                      labelText: esTipoCombo ? 'Nombre del Producto / Combo (ej. Súper Pancho + Coca)' : 'Nombre del Insumo (ej. Pan de Pancho)',
+                      labelText: esTipoCombo ? 'Nombre del Producto / Combo (ej. Súper Pancho + Coca)' : 'Nombre del Producto / Insumo (ej. Cerveza Quilmes)',
                       prefixIcon: const Icon(Icons.label_outline),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: contenidoCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(
+                            labelText: 'Contenido / Presentación (ej. 473, 0.750, 500)',
+                            prefixIcon: Icon(Icons.local_drink_outlined),
+                          ),
+                          onChanged: (_) => setModalState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: unidadContenido,
+                          decoration: const InputDecoration(
+                            labelText: 'Medida',
+                            prefixIcon: Icon(Icons.straighten),
+                          ),
+                          items: unidadesContenidoValidas.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+                          onChanged: (val) => setModalState(() => unidadContenido = val!),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
 
@@ -326,7 +360,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'Agrega insumos de cocina (pan, salchichas) y bebidas/productos (Coca-Cola, aguas, etc.):',
+                            'Agrega los componentes que conforman este combo:',
                             style: TextStyle(fontSize: 11, color: AppColors.textMuted),
                           ),
                           const SizedBox(height: 10),
@@ -349,7 +383,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                               itemBuilder: (context, index) {
                                 final r = ingredientesReceta[index];
                                 final insumoObj = _todosLosProductos.where((i) => i.id == r.insumoId).firstOrNull;
-                                final nombre = insumoObj?.nombre ?? r.insumoNombre ?? 'Ítem #${r.insumoId}';
+                                final nombre = insumoObj?.nombreConPresentacion ?? r.insumoNombre ?? 'Ítem #${r.insumoId}';
                                 final unidad = insumoObj?.unidadMedida ?? r.insumoUnidadMedida ?? 'Unidad';
                                 final costoUnit = insumoObj?.precioCosto ?? (r.insumoPrecioCosto ?? 0.0);
                                 final subtotal = r.cantidadRequerida * costoUnit;
@@ -421,81 +455,20 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    const Text('Filtrar:', style: TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
-                                    const SizedBox(width: 8),
-                                    ChoiceChip(
-                                      label: const Text('Todos', style: TextStyle(fontSize: 11)),
-                                      selected: filtroOrigen == 'TODOS',
-                                      selectedColor: AppColors.primary,
-                                      labelStyle: TextStyle(
-                                        color: filtroOrigen == 'TODOS' ? Colors.black : Colors.white70,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      onSelected: (val) => setModalState(() => filtroOrigen = 'TODOS'),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    ChoiceChip(
-                                      label: const Text('🥩 Insumos Cocina', style: TextStyle(fontSize: 11)),
-                                      selected: filtroOrigen == 'INSUMOS',
-                                      selectedColor: AppColors.primary,
-                                      labelStyle: TextStyle(
-                                        color: filtroOrigen == 'INSUMOS' ? Colors.black : Colors.white70,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      onSelected: (val) => setModalState(() => filtroOrigen = 'INSUMOS'),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    ChoiceChip(
-                                      label: const Text('🥤 Bebidas / Prods', style: TextStyle(fontSize: 11)),
-                                      selected: filtroOrigen == 'BEBIDAS',
-                                      selectedColor: AppColors.primary,
-                                      labelStyle: TextStyle(
-                                        color: filtroOrigen == 'BEBIDAS' ? Colors.black : Colors.white70,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      onSelected: (val) => setModalState(() => filtroOrigen = 'BEBIDAS'),
-                                    ),
+                                DropdownButtonFormField<int?>(
+                                  initialValue: filtroCategoriaComponente,
+                                  isDense: true,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Filtrar por Categoría',
+                                    isDense: true,
+                                    prefixIcon: Icon(Icons.filter_list, size: 18),
+                                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  ),
+                                  items: [
+                                    const DropdownMenuItem<int?>(value: null, child: Text('Todas las categorías', style: TextStyle(fontSize: 12))),
+                                    ..._categorias.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.nombre, style: const TextStyle(fontSize: 12)))),
                                   ],
-                                ),
-                                const SizedBox(height: 8),
-
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      flex: 2,
-                                      child: DropdownButtonFormField<int?>(
-                                        initialValue: filtroCategoriaComponente,
-                                        isDense: true,
-                                        decoration: const InputDecoration(
-                                          labelText: 'Categoría',
-                                          isDense: true,
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                        ),
-                                        items: [
-                                          const DropdownMenuItem<int?>(value: null, child: Text('Todas las categorías', style: TextStyle(fontSize: 11))),
-                                          ..._categorias.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.nombre, style: const TextStyle(fontSize: 11)))),
-                                        ],
-                                        onChanged: (val) => setModalState(() => filtroCategoriaComponente = val),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      flex: 2,
-                                      child: TextField(
-                                        controller: busquedaComponenteCtrl,
-                                        style: const TextStyle(fontSize: 12),
-                                        onChanged: (_) => setModalState(() {}),
-                                        decoration: const InputDecoration(
-                                          labelText: 'Buscar (ej. coca, pan...)',
-                                          isDense: true,
-                                          prefixIcon: Icon(Icons.search, size: 16),
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                  onChanged: (val) => setModalState(() => filtroCategoriaComponente = val),
                                 ),
                                 const SizedBox(height: 10),
 
@@ -503,7 +476,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                                   const Padding(
                                     padding: EdgeInsets.symmetric(vertical: 6),
                                     child: Text(
-                                      'No se encontraron elementos con los filtros actuales.',
+                                      'No se encontraron elementos en esta categoría.',
                                       style: TextStyle(color: AppColors.warning, fontSize: 11),
                                     ),
                                   )
@@ -764,6 +737,162 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
     );
   }
 
+  void _abrirModalGestionCategorias() {
+    final nuevaCatCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AppCrudDialog(
+              titulo: 'Gestión de Categorías',
+              icono: Icons.category,
+              maxWidth: 500,
+              textoGuardar: 'Listo',
+              onGuardar: () => Navigator.of(context).pop(),
+              contenido: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Agrega nuevas categorías para organizar tus insumos y productos (ej. Empanadas, Bebidas):',
+                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: nuevaCatCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Nueva Categoría (ej. Empanadas)',
+                            isDense: true,
+                            prefixIcon: Icon(Icons.label_outlined, size: 18),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Agregar', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        onPressed: () async {
+                          final nombre = nuevaCatCtrl.text.trim();
+                          if (nombre.isEmpty) return;
+
+                          await _categoriasRepo.insertCategoria(Categoria(nombre: nombre));
+                          nuevaCatCtrl.clear();
+                          await _cargarDatos();
+                          setModalState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  const Text(
+                    'Categorías Existentes:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (_categorias.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Text('No hay categorías registradas.', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _categorias.length,
+                      separatorBuilder: (context, index) => const Divider(height: 1, color: Colors.white10),
+                      itemBuilder: (context, index) {
+                        final cat = _categorias[index];
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          leading: const CircleAvatar(
+                            radius: 14,
+                            backgroundColor: AppColors.surfaceLight,
+                            child: Icon(Icons.label, size: 14, color: AppColors.primary),
+                          ),
+                          title: Text(cat.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, size: 18, color: AppColors.primary),
+                                tooltip: 'Renombrar categoría',
+                                onPressed: () {
+                                  _abrirModalEditarCategoria(cat, () {
+                                    _cargarDatos();
+                                    setModalState(() {});
+                                  });
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.secondary),
+                                tooltip: 'Eliminar categoría',
+                                onPressed: () async {
+                                  final bool confirmar = await AppConfirmDialog.mostrar(
+                                    context,
+                                    titulo: 'Eliminar Categoría',
+                                    mensaje: '¿Estás seguro de eliminar la categoría "${cat.nombre}"?',
+                                  );
+
+                                  if (!confirmar) return;
+
+                                  await _categoriasRepo.deleteCategoria(cat.id!);
+                                  await _cargarDatos();
+                                  setModalState(() {});
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _abrirModalEditarCategoria(Categoria cat, VoidCallback onGuardado) {
+    final editCtrl = TextEditingController(text: cat.nombre);
+    showDialog(
+      context: context,
+      builder: (ctx) => AppCrudDialog(
+        titulo: 'Renombrar Categoría',
+        icono: Icons.edit,
+        maxWidth: 400,
+        textoGuardar: 'Guardar Nombre',
+        onGuardar: () async {
+          final nuevoNombre = editCtrl.text.trim();
+          if (nuevoNombre.isEmpty) return;
+          await _categoriasRepo.updateCategoria(Categoria(id: cat.id, nombre: nuevoNombre));
+          if (!ctx.mounted) return;
+          Navigator.pop(ctx);
+          onGuardado();
+        },
+        contenido: TextField(
+          controller: editCtrl,
+          decoration: const InputDecoration(labelText: 'Nombre de la Categoría'),
+        ),
+      ),
+    );
+  }
+
   Widget _buildListaCombos() {
     return Column(
       children: [
@@ -773,6 +902,18 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
           onActualizar: _cargarDatos,
           textoBotonNuevo: 'Nuevo Combo',
           onNuevo: () => _abrirModalProducto(null, false),
+          accionesAdicionales: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.primary),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              icon: const Icon(Icons.category, size: 16),
+              label: const Text('Categorías', style: TextStyle(fontSize: 12)),
+              onPressed: _abrirModalGestionCategorias,
+            ),
+          ],
         ),
         Expanded(
           child: _combos.isEmpty
@@ -794,7 +935,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                           backgroundColor: AppColors.surfaceLight,
                           child: Icon(Icons.lunch_dining, color: AppColors.primary),
                         ),
-                        title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        title: Text(item.nombreConPresentacion, style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -866,6 +1007,18 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
           onActualizar: _cargarDatos,
           textoBotonNuevo: 'Nuevo Insumo',
           onNuevo: () => _abrirModalProducto(null, true),
+          accionesAdicionales: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                side: const BorderSide(color: AppColors.primary),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              icon: const Icon(Icons.category, size: 16),
+              label: const Text('Categorías', style: TextStyle(fontSize: 12)),
+              onPressed: _abrirModalGestionCategorias,
+            ),
+          ],
         ),
         Expanded(
           child: _insumos.isEmpty
@@ -889,7 +1042,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                           backgroundColor: stockColor.withValues(alpha: 0.2),
                           child: Icon(Icons.inventory, color: stockColor),
                         ),
-                        title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        title: Text(item.nombreConPresentacion, style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text('Costo: \$${item.precioCosto.toStringAsFixed(0)} c/u'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

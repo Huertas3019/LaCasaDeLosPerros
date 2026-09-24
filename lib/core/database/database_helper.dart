@@ -20,22 +20,31 @@ class DatabaseHelper {
 
       return await openDatabase(
         path,
-        version: 1,
+        version: 2,
         onConfigure: _onConfigure,
         onCreate: _createDB,
+        onUpgrade: _onUpgrade,
       );
     } catch (e) {
       return await openDatabase(
         inMemoryDatabasePath,
-        version: 1,
+        version: 2,
         onConfigure: _onConfigure,
         onCreate: _createDB,
+        onUpgrade: _onUpgrade,
       );
     }
   }
 
   Future<void> _onConfigure(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE productos ADD COLUMN contenido_neto REAL');
+      await db.execute('ALTER TABLE productos ADD COLUMN unidad_contenido TEXT');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -58,6 +67,8 @@ class DatabaseHelper {
         precio_venta_unitario REAL,
         stock_actual REAL NOT NULL DEFAULT 0.0,
         unidad_medida TEXT NOT NULL DEFAULT 'Unidad',
+        contenido_neto REAL,
+        unidad_contenido TEXT,
         es_vendible_solo INTEGER NOT NULL DEFAULT 1,
         activo INTEGER NOT NULL DEFAULT 1,
         creado_en TEXT DEFAULT CURRENT_TIMESTAMP,

@@ -6,6 +6,8 @@ class Producto {
   final double? precioVentaUnitario;
   final double stockActual;
   final String unidadMedida; // 'Unidad', 'Gramos', 'Litros', etc.
+  final double? contenidoNeto; // ej: 473, 750, 0.5
+  final String? unidadContenido; // ej: 'ml', 'L', 'cc', 'gr', 'kg'
   final bool esVendibleSolo;
   final bool activo;
   final String? creadoEn;
@@ -18,10 +20,23 @@ class Producto {
     this.precioVentaUnitario,
     this.stockActual = 0.0,
     this.unidadMedida = 'Unidad',
+    this.contenidoNeto,
+    this.unidadContenido,
     this.esVendibleSolo = true,
     this.activo = true,
     this.creadoEn,
   });
+
+  /// Nombre formateado con su presentación si aplica (ej. "Cerveza Quilmes (473 ml)")
+  String get nombreConPresentacion {
+    if (contenidoNeto != null && contenidoNeto! > 0 && unidadContenido != null && unidadContenido!.isNotEmpty) {
+      final cantStr = (contenidoNeto! % 1 == 0)
+          ? contenidoNeto!.toInt().toString()
+          : contenidoNeto!.toString();
+      return '$nombre ($cantStr $unidadContenido)';
+    }
+    return nombre;
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -32,6 +47,8 @@ class Producto {
       'precio_venta_unitario': precioVentaUnitario,
       'stock_actual': stockActual,
       'unidad_medida': unidadMedida,
+      'contenido_neto': contenidoNeto,
+      'unidad_contenido': unidadContenido,
       'es_vendible_solo': esVendibleSolo ? 1 : 0,
       'activo': activo ? 1 : 0,
       if (creadoEn != null) 'creado_en': creadoEn,
@@ -49,6 +66,8 @@ class Producto {
           : null,
       stockActual: (map['stock_actual'] as num).toDouble(),
       unidadMedida: (map['unidad_medida'] as String?) ?? 'Unidad',
+      contenidoNeto: map['contenido_neto'] != null ? (map['contenido_neto'] as num).toDouble() : null,
+      unidadContenido: map['unidad_contenido'] as String?,
       esVendibleSolo: (map['es_vendible_solo'] as int) == 1,
       activo: (map['activo'] as int) == 1,
       creadoEn: map['creado_en'] as String?,
@@ -63,6 +82,8 @@ class Producto {
     double? precioVentaUnitario,
     double? stockActual,
     String? unidadMedida,
+    double? contenidoNeto,
+    String? unidadContenido,
     bool? esVendibleSolo,
     bool? activo,
     String? creadoEn,
@@ -75,6 +96,8 @@ class Producto {
       precioVentaUnitario: precioVentaUnitario ?? this.precioVentaUnitario,
       stockActual: stockActual ?? this.stockActual,
       unidadMedida: unidadMedida ?? this.unidadMedida,
+      contenidoNeto: contenidoNeto ?? this.contenidoNeto,
+      unidadContenido: unidadContenido ?? this.unidadContenido,
       esVendibleSolo: esVendibleSolo ?? this.esVendibleSolo,
       activo: activo ?? this.activo,
       creadoEn: creadoEn ?? this.creadoEn,

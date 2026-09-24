@@ -52,6 +52,8 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
   }
 
   void _abrirModalProducto([Producto? productoExistente, bool esInsumoInicial = true]) async {
+    const unidadesValidas = ['Unidad', 'Gramos', 'Kilos', 'Litros'];
+
     final nombreCtrl = TextEditingController(text: productoExistente?.nombre ?? '');
     final costoDirectoCtrl = TextEditingController(text: productoExistente?.precioCosto.toString() ?? '0');
     final ventaCtrl = TextEditingController(text: productoExistente?.precioVentaUnitario?.toString() ?? '');
@@ -59,8 +61,13 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
     final cantidadInsumoCtrl = TextEditingController(text: '1');
     final busquedaComponenteCtrl = TextEditingController();
     
-    String unidadMedida = productoExistente?.unidadMedida ?? 'Unidad';
-    int? categoriaId = productoExistente?.categoriaId ?? (_categorias.isNotEmpty ? _categorias.first.id : null);
+    String unidadMedida = unidadesValidas.contains(productoExistente?.unidadMedida)
+        ? productoExistente!.unidadMedida
+        : 'Unidad';
+
+    int? categoriaId = (_categorias.any((c) => c.id == productoExistente?.categoriaId))
+        ? productoExistente!.categoriaId
+        : (_categorias.isNotEmpty ? _categorias.first.id : null);
     
     // Filtros para el selector de componentes en combos
     String filtroOrigen = 'TODOS'; // 'TODOS', 'INSUMOS', 'BEBIDAS'
@@ -132,6 +139,11 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
               insumoAgregarId = null;
             }
 
+            // Validar que categoriaId exista en _categorias
+            final int? categoriaSeleccionada = (_categorias.any((c) => c.id == categoriaId))
+                ? categoriaId
+                : (_categorias.isNotEmpty ? _categorias.first.id : null);
+
             return AlertDialog(
               backgroundColor: AppColors.surface,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -142,12 +154,43 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                     color: AppColors.primary,
                   ),
                   const SizedBox(width: 10),
-                  Text(
-                    productoExistente == null 
-                        ? (esTipoCombo ? 'Nuevo Producto / Combo' : 'Nuevo Insumo')
-                        : 'Editar: ${productoExistente.nombre}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  Expanded(
+                    child: Text(
+                      productoExistente == null 
+                          ? (esTipoCombo ? 'Nuevo Producto / Combo' : 'Nuevo Insumo')
+                          : 'Editar: ${productoExistente.nombre}',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
+                  if (productoExistente != null)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: AppColors.secondary),
+                      tooltip: 'Eliminar ítem permanentemente',
+                      onPressed: () async {
+                        final bool confirmar = await _mostrarDialogoConfirmacion(
+                          context: context,
+                          titulo: 'Eliminar Ítem',
+                          mensaje: '¿Estás seguro de que deseas eliminar permanentemente "${productoExistente.nombre}"? Si es un combo o insumo con recetas, sus asociaciones también se borrarán.',
+                          textoConfirmar: 'Sí, Eliminar',
+                        );
+
+                        if (!confirmar) return;
+
+                        await _productosRepo.deleteProducto(productoExistente.id!);
+
+                        if (!context.mounted) return;
+                        Navigator.pop(context);
+                        _cargarDatos();
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('"${productoExistente.nombre}" fue eliminado correctamente.'),
+                            backgroundColor: AppColors.secondary,
+                          ),
+                        );
+                      },
+                    ),
                 ],
               ),
               content: SizedBox(
@@ -234,17 +277,18 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                       ),
                       const SizedBox(height: 12),
 
-                      DropdownButtonFormField<int>(
-                        initialValue: categoriaId,
-                        decoration: const InputDecoration(
-                          labelText: 'Categoría del Ítem',
-                          prefixIcon: Icon(Icons.category_outlined),
+                      if (_categorias.isNotEmpty)
+                        DropdownButtonFormField<int>(
+                          initialValue: categoriaSeleccionada,
+                          decoration: const InputDecoration(
+                            labelText: 'Categoría del Ítem',
+                            prefixIcon: Icon(Icons.category_outlined),
+                          ),
+                          items: _categorias.map((c) {
+                            return DropdownMenuItem<int>(value: c.id, child: Text(c.nombre));
+                          }).toList(),
+                          onChanged: (val) => setModalState(() => categoriaId = val),
                         ),
-                        items: _categorias.map((c) {
-                          return DropdownMenuItem(value: c.id, child: Text(c.nombre));
-                        }).toList(),
-                        onChanged: (val) => setModalState(() => categoriaId = val),
-                      ),
                       const SizedBox(height: 16),
 
                       // SECCIÓN DE RECETA / COMPONENTES PARA COMBOS
@@ -445,8 +489,8 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                                               contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                             ),
                                             items: [
-                                              const DropdownMenuItem(value: null, child: Text('Todas las categorías', style: TextStyle(fontSize: 11))),
-                                              ..._categorias.map((c) => DropdownMenuItem(value: c.id, child: Text(c.nombre, style: const TextStyle(fontSize: 11)))),
+                                              const DropdownMenuItem<int?>(value: null, child: Text('Todas las categorías', style: TextStyle(fontSize: 11))),
+                                              ..._categorias.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.nombre, style: const TextStyle(fontSize: 11)))),
                                             ],
                                             onChanged: (val) => setModalState(() => filtroCategoriaComponente = val),
                                           ),
@@ -488,10 +532,10 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                                             child: DropdownButtonHideUnderline(
                                               child: DropdownButton<int>(
                                                 isExpanded: true,
-                                                value: insumoAgregarId,
+                                                value: (componentesFiltrados.any((i) => i.id == insumoAgregarId)) ? insumoAgregarId : null,
                                                 items: componentesFiltrados.map((i) {
                                                   final bool esBeb = i.esVendibleSolo;
-                                                  return DropdownMenuItem(
+                                                  return DropdownMenuItem<int>(
                                                     value: i.id,
                                                     child: Text(
                                                       '${esBeb ? '🥤' : '🥩'} ${i.nombre} (\$${i.precioCosto.toStringAsFixed(0)}/${i.unidadMedida}) - Stk: ${i.stockActual.toStringAsFixed(0)}',
@@ -579,7 +623,7 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                         decoration: BoxDecoration(
                           color: AppColors.surfaceLight,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.white12),
+                          border: Border.all(color: Colors.white10),
                         ),
                         child: Column(
                           children: [
@@ -735,46 +779,10 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                 ),
               ),
               actions: [
-                if (productoExistente != null)
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.secondary.withValues(alpha: 0.15),
-                      foregroundColor: AppColors.secondary,
-                      side: const BorderSide(color: AppColors.secondary),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    ),
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    label: const Text('Eliminar Ítem', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () async {
-                      final bool confirmar = await _mostrarDialogoConfirmacion(
-                        context: context,
-                        titulo: 'Eliminar Ítem',
-                        mensaje: '¿Estás seguro de que deseas eliminar permanentemente "${productoExistente.nombre}"? Si es un combo o insumo con recetas, sus asociaciones también se borrarán.',
-                        textoConfirmar: 'Sí, Eliminar',
-                      );
-
-                      if (!confirmar) return;
-
-                      await _productosRepo.deleteProducto(productoExistente.id!);
-
-                      if (!context.mounted) return;
-                      Navigator.pop(context);
-                      _cargarDatos();
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('"${productoExistente.nombre}" fue eliminado correctamente.'),
-                          backgroundColor: AppColors.secondary,
-                        ),
-                      );
-                    },
-                  ),
-                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
                 ),
-                const SizedBox(width: 8),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,

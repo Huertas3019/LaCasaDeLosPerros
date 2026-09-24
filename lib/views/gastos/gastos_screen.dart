@@ -5,6 +5,7 @@ import '../../models/gasto.dart';
 import '../../models/turno.dart';
 import '../../repositories/gastos_repository.dart';
 import '../../repositories/turnos_repository.dart';
+import '../../widgets/app_widgets.dart';
 
 class GastosScreen extends StatefulWidget {
   const GastosScreen({super.key});
@@ -54,33 +55,59 @@ class _GastosScreenState extends State<GastosScreen> {
   void _abrirModalNuevoGasto({required bool esGastoTurno}) {
     final descCtrl = TextEditingController();
     final montoCtrl = TextEditingController();
-    String medioPago = 'EFECTIVO'; // 'EFECTIVO', 'TRANSFERENCIA'
+    String medioPago = 'EFECTIVO';
 
     showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return AlertDialog(
-              title: Row(
-                children: [
-                  Icon(esGastoTurno ? Icons.shopping_bag : Icons.account_balance_wallet, color: AppColors.primary),
-                  const SizedBox(width: 8),
-                  Text(esGastoTurno ? 'Gasto de Caja de Turno' : 'Gasto Fijo Operacional'),
-                ],
-              ),
-              content: Column(
+            return AppCrudDialog(
+              titulo: esGastoTurno ? 'Gasto de Caja de Turno' : 'Gasto Fijo Operacional',
+              icono: esGastoTurno ? Icons.shopping_bag : Icons.account_balance_wallet,
+              textoGuardar: 'Guardar Gasto',
+              maxWidth: 500,
+              onGuardar: () async {
+                if (descCtrl.text.trim().isEmpty) return;
+                double monto = double.tryParse(montoCtrl.text) ?? 0.0;
+                if (monto <= 0) return;
+
+                await _gastosRepo.registrarGasto(Gasto(
+                  turnoId: esGastoTurno ? _turnoActivo?.id : null,
+                  descripcion: descCtrl.text.trim(),
+                  monto: monto,
+                  tipoTransaccion: esGastoTurno ? 'CAJA_TURNO' : 'OPERATIVO_FIJO',
+                  medioPago: medioPago,
+                  fecha: DateTime.now().toIso8601String(),
+                ));
+
+                if (!context.mounted) return;
+                Navigator.pop(context);
+                _cargarDatos();
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('¡Gasto registrado con éxito!'),
+                    backgroundColor: AppColors.success,
+                  ),
+                );
+              },
+              contenido: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: descCtrl,
-                    decoration: const InputDecoration(labelText: 'Descripción / Concepto (ej. Compra Hielo, Luz)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Descripción / Concepto (ej. Compra Hielo, Luz)',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: montoCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Monto del Gasto (\$)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Monto del Gasto (\$)',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -94,40 +121,6 @@ class _GastosScreenState extends State<GastosScreen> {
                   ),
                 ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancelar'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (descCtrl.text.trim().isEmpty) return;
-                    double monto = double.tryParse(montoCtrl.text) ?? 0.0;
-                    if (monto <= 0) return;
-
-                    await _gastosRepo.registrarGasto(Gasto(
-                      turnoId: esGastoTurno ? _turnoActivo?.id : null,
-                      descripcion: descCtrl.text.trim(),
-                      monto: monto,
-                      tipoTransaccion: esGastoTurno ? 'CAJA_TURNO' : 'OPERATIVO_FIJO',
-                      medioPago: medioPago,
-                      fecha: DateTime.now().toIso8601String(),
-                    ));
-
-                    if (!context.mounted) return;
-                    Navigator.pop(context);
-                    _cargarDatos();
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('¡Gasto registrado con éxito!'),
-                        backgroundColor: AppColors.success,
-                      ),
-                    );
-                  },
-                  child: const Text('Guardar Gasto'),
-                ),
-              ],
             );
           },
         );
@@ -157,13 +150,11 @@ class _GastosScreenState extends State<GastosScreen> {
           Expanded(
             child: TabBarView(
               children: [
-                // Gastos del Turno Activo
                 _buildListaGastos(
                   gastos: _gastosTurno,
                   esGastoTurno: true,
                   puedeAgregar: _turnoActivo != null,
                 ),
-                // Gastos Fijos
                 _buildListaGastos(
                   gastos: _gastosFijos,
                   esGastoTurno: false,
@@ -177,42 +168,6 @@ class _GastosScreenState extends State<GastosScreen> {
     );
   }
 
-  Future<bool> _mostrarDialogoConfirmacion({
-    required BuildContext context,
-    required String titulo,
-    required String mensaje,
-  }) async {
-    final res = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Row(
-          children: [
-            const Icon(Icons.warning_amber_rounded, color: AppColors.secondary),
-            const SizedBox(width: 8),
-            Text(titulo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Text(mensaje),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.secondary,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sí, Eliminar'),
-          ),
-        ],
-      ),
-    );
-    return res ?? false;
-  }
-
   Widget _buildListaGastos({
     required List<Gasto> gastos,
     required bool esGastoTurno,
@@ -222,58 +177,18 @@ class _GastosScreenState extends State<GastosScreen> {
 
     return Column(
       children: [
-        // Barra Superior de Herramientas (Top Toolbar)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            border: Border(bottom: BorderSide(color: Colors.white10)),
-          ),
-          child: Row(
-            children: [
-              Icon(esGastoTurno ? Icons.receipt_long : Icons.business_center, color: AppColors.primary, size: 20),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    esGastoTurno ? 'Gastos del Turno (${gastos.length})' : 'Gastos Fijos (${gastos.length})',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  Text(
-                    'Total acumulado: ${_currencyFormat.format(totalGastos)}',
-                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textSecondary,
-                  side: const BorderSide(color: Colors.white24),
-                ),
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Actualizar'),
-                onPressed: _cargarDatos,
-              ),
-              if (puedeAgregar) ...[
-                const SizedBox(width: 10),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  ),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: Text(
-                    esGastoTurno ? 'Nuevo Gasto de Turno' : 'Nuevo Gasto Fijo',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () => _abrirModalNuevoGasto(esGastoTurno: esGastoTurno),
-                ),
-              ],
-            ],
-          ),
+        AppToolbar(
+          tituloContador: esGastoTurno ? 'Gastos del Turno' : 'Gastos Fijos',
+          cantidadRegistros: gastos.length,
+          onActualizar: _cargarDatos,
+          textoBotonNuevo: puedeAgregar ? (esGastoTurno ? 'Nuevo Gasto de Turno' : 'Nuevo Gasto Fijo') : null,
+          onNuevo: puedeAgregar ? () => _abrirModalNuevoGasto(esGastoTurno: esGastoTurno) : null,
+          accionesAdicionales: [
+            Text(
+              'Total: ${_currencyFormat.format(totalGastos)}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary),
+            ),
+          ],
         ),
         Expanded(
           child: gastos.isEmpty
@@ -322,8 +237,8 @@ class _GastosScreenState extends State<GastosScreen> {
                               icon: const Icon(Icons.delete_outline, color: AppColors.secondary, size: 20),
                               tooltip: 'Eliminar gasto',
                               onPressed: () async {
-                                final bool confirmar = await _mostrarDialogoConfirmacion(
-                                  context: context,
+                                final bool confirmar = await AppConfirmDialog.mostrar(
+                                  context,
                                   titulo: 'Eliminar Gasto',
                                   mensaje: '¿Estás seguro de eliminar el registro de gasto "${g.descripcion}" de ${_currencyFormat.format(g.monto)}?',
                                 );

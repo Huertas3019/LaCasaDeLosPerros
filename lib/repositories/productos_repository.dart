@@ -86,4 +86,14 @@ class ProductosRepository {
       whereArgs: [id],
     );
   }
+
+  Future<int> deleteProducto(int id) async {
+    final db = await _dbHelper.database;
+    return await db.transaction((txn) async {
+      // Eliminar recetas donde sea producto padre o insumo hijo
+      await txn.delete('recetas', where: 'producto_padre_id = ? OR insumo_id = ?', whereArgs: [id, id]);
+      // Eliminar el producto
+      return await txn.delete('productos', where: 'id = ?', whereArgs: [id]);
+    });
+  }
 }

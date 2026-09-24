@@ -735,10 +735,46 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
                 ),
               ),
               actions: [
+                if (productoExistente != null)
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.secondary.withValues(alpha: 0.15),
+                      foregroundColor: AppColors.secondary,
+                      side: const BorderSide(color: AppColors.secondary),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text('Eliminar Ítem', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final bool confirmar = await _mostrarDialogoConfirmacion(
+                        context: context,
+                        titulo: 'Eliminar Ítem',
+                        mensaje: '¿Estás seguro de que deseas eliminar permanentemente "${productoExistente.nombre}"? Si es un combo o insumo con recetas, sus asociaciones también se borrarán.',
+                        textoConfirmar: 'Sí, Eliminar',
+                      );
+
+                      if (!confirmar) return;
+
+                      await _productosRepo.deleteProducto(productoExistente.id!);
+
+                      if (!context.mounted) return;
+                      Navigator.pop(context);
+                      _cargarDatos();
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('"${productoExistente.nombre}" fue eliminado correctamente.'),
+                          backgroundColor: AppColors.secondary,
+                        ),
+                      );
+                    },
+                  ),
+                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
                 ),
+                const SizedBox(width: 8),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -792,6 +828,44 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
     );
   }
 
+  Future<bool> _mostrarDialogoConfirmacion({
+    required BuildContext context,
+    required String titulo,
+    required String mensaje,
+    String textoConfirmar = 'Eliminar',
+    Color colorConfirmar = AppColors.secondary,
+  }) async {
+    final res = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: colorConfirmar),
+            const SizedBox(width: 8),
+            Text(titulo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colorConfirmar,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(textoConfirmar),
+          ),
+        ],
+      ),
+    );
+    return res ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -824,151 +898,224 @@ class _InventarioScreenState extends State<InventarioScreen> with SingleTickerPr
   }
 
   Widget _buildListaCombos() {
-    return Scaffold(
-      body: _combos.isEmpty
-          ? const Center(child: Text('No hay combos o productos finales agregados.'))
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _combos.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final item = _combos[index];
-                final double venta = item.precioVentaUnitario ?? 0.0;
-                final double costo = item.precioCosto;
-                final double ganancia = venta - costo;
-                final double margen = venta > 0 ? (ganancia / venta) * 100 : 0.0;
+    return Column(
+      children: [
+        // Barra Superior de Herramientas (Top Toolbar)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            border: Border(bottom: BorderSide(color: Colors.white10)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.fastfood, color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Listado de Combos y Productos (${_combos.length})',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const Spacer(),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
+                  side: const BorderSide(color: Colors.white24),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Actualizar'),
+                onPressed: _cargarDatos,
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Nuevo Combo', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed: () => _abrirModalProducto(null, false),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _combos.isEmpty
+              ? const Center(child: Text('No hay combos o productos finales agregados.'))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _combos.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = _combos[index];
+                    final double venta = item.precioVentaUnitario ?? 0.0;
+                    final double costo = item.precioCosto;
+                    final double ganancia = venta - costo;
+                    final double margen = venta > 0 ? (ganancia / venta) * 100 : 0.0;
 
-                return Card(
-                  child: ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: AppColors.surfaceLight,
-                      child: Icon(Icons.lunch_dining, color: AppColors.primary),
-                    ),
-                    title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 4),
-                        Text(
-                          'Venta: \$${venta.toStringAsFixed(0)} | Costo Insumos: \$${costo.toStringAsFixed(0)}',
-                          style: const TextStyle(fontSize: 12),
+                    return Card(
+                      child: ListTile(
+                        leading: const CircleAvatar(
+                          backgroundColor: AppColors.surfaceLight,
+                          child: Icon(Icons.lunch_dining, color: AppColors.primary),
                         ),
-                        const SizedBox(height: 2),
-                        Row(
+                        title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            const SizedBox(height: 4),
                             Text(
-                              'Ganancia: \$${ganancia.toStringAsFixed(0)}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: ganancia >= 0 ? AppColors.success : AppColors.secondary,
-                              ),
+                              'Venta: \$${venta.toStringAsFixed(0)} | Costo Insumos: \$${costo.toStringAsFixed(0)}',
+                              style: const TextStyle(fontSize: 12),
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: margen >= 40
-                                    ? AppColors.success.withValues(alpha: 0.2)
-                                    : (margen > 0 ? AppColors.warning.withValues(alpha: 0.2) : AppColors.secondary.withValues(alpha: 0.2)),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                'Margen: ${margen.toStringAsFixed(0)}%',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: margen >= 40
-                                      ? AppColors.success
-                                      : (margen > 0 ? AppColors.warning : AppColors.secondary),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Text(
+                                  'Ganancia: \$${ganancia.toStringAsFixed(0)}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: ganancia >= 0 ? AppColors.success : AppColors.secondary,
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: margen >= 40
+                                        ? AppColors.success.withValues(alpha: 0.2)
+                                        : (margen > 0 ? AppColors.warning.withValues(alpha: 0.2) : AppColors.secondary.withValues(alpha: 0.2)),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    'Margen: ${margen.toStringAsFixed(0)}%',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: margen >= 40
+                                          ? AppColors.success
+                                          : (margen > 0 ? AppColors.warning : AppColors.secondary),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: AppColors.primary),
-                          tooltip: 'Editar combo y receta',
-                          onPressed: () => _abrirModalProducto(item, false),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: AppColors.primary),
+                              tooltip: 'Editar / Eliminar combo',
+                              onPressed: () => _abrirModalProducto(item, false),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Combo'),
-        onPressed: () => _abrirModalProducto(null, false),
-      ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
   Widget _buildListaInsumos() {
-    return Scaffold(
-      body: _insumos.isEmpty
-          ? const Center(child: Text('No hay insumos físicos agregados.'))
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _insumos.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final item = _insumos[index];
-                Color stockColor = AppColors.success;
-                if (item.stockActual <= 0) {
-                  stockColor = AppColors.secondary;
-                } else if (item.stockActual < 20) {
-                  stockColor = AppColors.warning;
-                }
+    return Column(
+      children: [
+        // Barra Superior de Herramientas (Top Toolbar)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            border: Border(bottom: BorderSide(color: Colors.white10)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.inventory_2, color: AppColors.primary, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Listado de Insumos & Ingredientes (${_insumos.length})',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const Spacer(),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
+                  side: const BorderSide(color: Colors.white24),
+                ),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Actualizar'),
+                onPressed: _cargarDatos,
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Nuevo Insumo', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed: () => _abrirModalProducto(null, true),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _insumos.isEmpty
+              ? const Center(child: Text('No hay insumos físicos agregados.'))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _insumos.length,
+                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = _insumos[index];
+                    Color stockColor = AppColors.success;
+                    if (item.stockActual <= 0) {
+                      stockColor = AppColors.secondary;
+                    } else if (item.stockActual < 20) {
+                      stockColor = AppColors.warning;
+                    }
 
-                return Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: stockColor.withValues(alpha: 0.2),
-                      child: Icon(Icons.inventory, color: stockColor),
-                    ),
-                    title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('Costo: \$${item.precioCosto.toStringAsFixed(0)} c/u'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Chip(
-                          avatar: Icon(
-                            item.stockActual <= 0 ? Icons.warning : Icons.check_circle,
-                            size: 14,
-                            color: Colors.white,
-                          ),
-                          backgroundColor: stockColor,
-                          label: Text(
-                            'Stock: ${item.stockActual.toStringAsFixed(1)} ${item.unidadMedida}',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                          ),
+                    return Card(
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: stockColor.withValues(alpha: 0.2),
+                          child: Icon(Icons.inventory, color: stockColor),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: AppColors.textSecondary),
-                          onPressed: () => _abrirModalProducto(item, true),
+                        title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Costo: \$${item.precioCosto.toStringAsFixed(0)} c/u'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Chip(
+                              avatar: Icon(
+                                item.stockActual <= 0 ? Icons.warning : Icons.check_circle,
+                                size: 14,
+                                color: Colors.white,
+                              ),
+                              backgroundColor: stockColor,
+                              label: Text(
+                                'Stock: ${item.stockActual.toStringAsFixed(1)} ${item.unidadMedida}',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: AppColors.primary),
+                              tooltip: 'Editar / Eliminar insumo',
+                              onPressed: () => _abrirModalProducto(item, true),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Insumo'),
-        onPressed: () => _abrirModalProducto(null, true),
-      ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

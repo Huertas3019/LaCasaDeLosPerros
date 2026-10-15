@@ -7,7 +7,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Pre-calentar la base de datos al arrancar (Maneja plataformas nativas y web automáticamente)
-  await DatabaseHelper.instance.database;
+  try {
+    await DatabaseHelper.instance.database;
+  } catch (e) {
+    debugPrint('Error al inicializar BD al arrancar: $e');
+  }
 
   runApp(const LaCasaDeLosPerrosApp());
 }

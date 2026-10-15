@@ -1,0 +1,209 @@
+Sistema de Gestión para App de Comida Rápida - Documento de Arquitectura
+Razonamiento del Problema
+El Desafío Principal
+El problema central es manejar un sistema donde los productos pueden tener múltiples niveles de composición:
+Algunos ítems se compran y se venden directamente
+Otros se compran pero no se venden solos (son componentes)
+Algunos se fabrican combinando componentes
+Y existen paquetes que combinan productos fabricados con ítems vendibles
+La complejidad radica en que al vender un paquete complejo, el sistema debe saber exactamente qué componentes físicos debe descontar del inventario, independientemente de cuántos niveles de composición existan.
+La Solución: Modelo de Ítems Unificado
+En lugar de crear tablas separadas para "productos", "ingredientes" y "combos", todo se unifica en una sola entidad llamada Item con diferentes roles. Esto permite:
+Reutilización: Un mismo ítem puede ser componente de múltiples productos
+Escalabilidad: Se pueden agregar nuevos niveles de composición sin modificar la estructura
+Consistencia: Todos los cálculos de costo y stock siguen la misma lógica
+Tipos de Ítems y sus Características
+INSUMO:
+Representa materia prima física
+Tiene precio de compra y stock físico
+Puede o no ser vendible directamente al cliente
+Es el nivel más bajo de la jerarquía (no tiene componentes)
+PRODUCTO:
+Representa una preparación que se arma en el momento
+No tiene stock propio (solo sus componentes tienen stock)
+Su costo se calcula sumando el costo de sus componentes
+Tiene precio de venta al público
+Se compone de uno o más INSUMOS
+COMBO:
+Representa un paquete de venta con precio especial
+No tiene stock propio
+Su costo se calcula sumando el costo de sus componentes
+Tiene precio de venta al público
+Se compone de PRODUCTOS y/o INSUMOS vendibles
+La Clave: Recursividad
+El concepto fundamental es que tanto PRODUCTOS como COMBOS se definen mediante una tabla de recetas que establece relaciones padre-hijo. Cuando se vende un ítem compuesto, el sistema debe "explotar" la receta recursivamente hasta llegar a los INSUMOS, que son los únicos que tienen stock físico.
+Estructura de Base de Datos MySQL
+Tabla items (Catálogo Maestro)
+Esta tabla almacena todos los ítems del sistema, independientemente de su tipo.
+Campos principales:
+id: Identificador único
+nombre: Nombre descriptivo del ítem
+tipo: Clasificación (INSUMO, PRODUCTO, COMBO)
+es_vendible: Indica si el ítem puede venderse directamente al cliente
+precio_venta: Precio al público (0 para insumos no vendibles)
+unidad_base: Unidad de medida más pequeña (unidad, gramo, litro)
+stock_actual: Cantidad disponible (solo relevante para INSUMOS)
+precio_compra_unitario: Costo de adquisición (solo INSUMOS)
+activo: Estado del ítem (para desactivar sin eliminar)
+Lógica de uso:
+Los INSUMOS tienen stock_actual y precio_compra_unitario
+Los PRODUCTOS y COMBOS tienen precio_venta y es_vendible = TRUE
+Los INSUMOS no vendibles tienen es_vendible = FALSE y precio_venta = 0
+Tabla recetas (Relaciones de Composición)
+Esta tabla establece las relaciones entre ítems padres e hijos, permitiendo definir la composición de PRODUCTOS y COMBOS.
+Campos principales:
+id_item_padre: Ítem que se está componiendo
+id_item_hijo: Ítem que forma parte de la composición
+cantidad: Cuántas unidades del hijo se necesitan para el padre
+Lógica de uso:
+Un PRODUCTO tendrá múltiples registros apuntando a sus INSUMOS componentes
+Un COMBO tendrá múltiples registros apuntando a PRODUCTOS y/o INSUMOS vendibles
+La misma tabla maneja cualquier nivel de profundidad en la jerarquía
+Tabla ajustes_inventario (Control de Mermas y Correcciones)
+Esta tabla registra todos los movimientos de stock que no provienen de ventas.
+Campos principales:
+id_insumo: Ítem afectado (solo INSUMOS)
+cantidad: Cantidad movida (positivo para ingresos, negativo para salidas)
+tipo_ajuste: Clasificación del movimiento (MERMA, ROBO, DONACION, CORRECCION, INGRESO_MANUAL)
+motivo: Descripción opcional del原因
+usuario_id: Quién registró el ajuste
+fecha: Timestamp del movimiento
+Lógica de uso:
+Permite rastrear por qué el stock no coincide con las ventas
+Facilita el cálculo del costo real de las mermas
+Proporciona auditoría completa del inventario
+Tablas ventas y detalle_ventas (Registro de Transacciones)
+Tabla ventas:
+id: Identificador de la venta
+fecha: Timestamp de la transacción
+total: Monto total de la venta
+usuario_id: Quién procesó la venta
+Tabla detalle_ventas:
+id_venta: Referencia a la venta
+id_item: Ítem vendido
+cantidad: Unidades vendidas
+precio_unitario: Precio al momento de la venta
+subtotal: Cantidad × precio unitario
+Lógica de uso:
+La tabla ventas registra el encabezado de cada transacción
+La tabla detalle_ventas registra cada ítem vendido con su precio histórico
+Esto permite que cambios futuros en precios no afecten el historial de ventas
+Lógica de Operaciones en Flutter/Dart
+Procesamiento de Ventas
+El flujo de procesamiento de una venta sigue estos pasos:
+Creación de la venta: Se registra el encabezado y todos los ítems vendidos en las tablas correspondientes
+Desconto de stock: Para cada ítem vendido, se invoca la función de explosión de receta
+Confirmación: Se notifica al usuario del éxito de la operación
+Explosión de Receta (Desconto Recursivo de Stock)
+Esta es la función más crítica del sistema. Su propósito es determinar qué INSUMOS físicos deben descontarse cuando se vende un PRODUCTO o COMBO.
+
+Algoritmo:
+Función descontarStockRecursivo(idItem, cantidadVendida):
+    1. Obtener información del ítem
+    2. Si el ítem es INSUMO:
+        - Descontar cantidadVendida del stock_actual
+        - Retornar (caso base de la recursión)
+    3. Si el ítem es PRODUCTO o COMBO:
+        - Obtener todos los componentes de la receta
+        - Para cada componente:
+            - Calcular cantidadNecesaria = componente.cantidad × cantidadVendida
+            - Llamar recursivamente a descontarStockRecursivo(componente.idItemHijo, cantidadNecesaria)
+
+Razonamiento del algoritmo:
+El algoritmo funciona como un árbol de decisión:
+Si llega a un INSUMO, ejecuta la acción (descontar stock) y termina
+Si llega a un PRODUCTO o COMBO, se expande en sus componentes y repite el proceso
+La recursión garantiza que sin importar la profundidad de la jerarquía, siempre se llegará a los INSUMOS
+Ejemplo conceptual:
+Si se vende un COMBO que contiene un PRODUCTO que a su vez contiene INSUMOS:
+Nivel 1: COMBO → se expande en sus componentes
+Nivel 2: PRODUCTO → se expande en sus componentes
+Nivel 3: INSUMOS → se descuenta stock
+El sistema procesa cada rama del árbol hasta llegar a las hojas (INSUMOS).
+Registro de Desperdicios
+El proceso de registro de desperdicios sigue estos pasos:
+Validación: Verificar que el ítem sea un INSUMO (solo los insumos tienen stock físico)
+Validación de stock: Asegurar que haya suficiente stock disponible
+Registro del ajuste: Insertar un nuevo registro en la tabla ajustes_inventario con cantidad negativa
+Actualización de stock: Restar la cantidad del stock_actual del INSUMO
+Lógica:
+Los desperdicios siempre son salidas de inventario (cantidad negativa)
+Se registran con un tipo específico (MERMA, ROBO, etc.) para análisis posterior
+El motivo es opcional pero recomendado para auditoría
+Registro de Ingresos Manuales
+El proceso es similar al de desperdicios pero con cantidad positiva:
+Registro del ajuste: Insertar en ajustes_inventario con cantidad positiva y tipo INGRESO_MANUAL
+Actualización de stock: Sumar la cantidad al stock_actual del INSUMO
+Lógica:
+Se usa cuando se recibe mercadería que no fue registrada en el sistema
+Permite corregir errores de inventario
+Mantiene el historial completo de movimientos
+Cálculo de Costos
+El cálculo del costo de un PRODUCTO o COMBO sigue la misma lógica recursiva que el desconto de stock:
+
+Algoritmo:
+Función calcularCostoItem(idItem):
+    1. Obtener información del ítem
+    2. Si el ítem es INSUMO:
+        - Retornar precio_compra_unitario
+    3. Si el ítem es PRODUCTO o COMBO:
+        - Inicializar costoTotal = 0
+        - Obtener todos los componentes de la receta
+        - Para cada componente:
+            - costoComponente = calcularCostoItem(componente.idItemHijo)
+            - costoTotal += costoComponente × componente.cantidad
+        - Retornar costoTotal
+
+Razonamiento:
+El costo de un ítem compuesto es la suma de los costos de todos sus componentes, multiplicados por la cantidad necesaria de cada uno. La recursión permite calcular costos de ítems con múltiples niveles de composición.
+Flujo de Carga de Datos
+Secuencia Obligatoria
+El orden en que se cargan los datos es crítico para mantener la integridad referencial:
+Paso 1: Crear INSUMOS
+Definir todos los insumos con sus precios de compra
+Establecer cuáles son vendibles y cuáles no
+Inicializar stock (puede ser 0 y ajustarse después)
+Paso 2: Crear PRODUCTOS
+Crear cada producto con su precio de venta
+Definir su receta seleccionando los INSUMOS componentes
+El sistema calcula automáticamente el costo
+Validar que el precio de venta sea mayor al costo
+Paso 3: Crear COMBOS
+Crear cada combo con su precio de venta
+Definir su receta seleccionando PRODUCTOS y/o INSUMOS vendibles
+El sistema calcula automáticamente el costo
+Validar que el precio del combo ofrezca un descuento real
+Validaciones del Sistema
+No se puede crear un PRODUCTO o COMBO sin componentes
+No se puede crear un ciclo (un ítem no puede ser componente de sí mismo)
+El precio de venta debe ser mayor o igual al costo calculado
+Solo los INSUMOS pueden tener ajustes de inventario
+Consideraciones de Rendimiento
+Optimización de Consultas
+Índices: Crear índices en id_item_padre e id_item_hijo en la tabla recetas
+Caché: Considerar cachear el cálculo de costos si no cambian frecuentemente
+Transacciones: Usar transacciones para operaciones que modifican múltiples tablas
+Manejo de Stock Negativo
+El sistema debe decidir si permite stock negativo o lo bloquea:
+Opción 1: Permitir stock negativo (útil si se vende antes de registrar compras)
+Opción 2: Bloquear ventas si no hay stock suficiente (más estricto)
+La recomendación es permitir stock negativo pero alertar al usuario, ya que en la práctica es común vender antes de registrar todas las compras.
+Concurrencia
+Si múltiples usuarios procesan ventas simultáneamente:
+Usar transacciones con bloqueo de filas al actualizar stock
+Considerar el uso de SELECT ... FOR UPDATE en MySQL
+Implementar reintentos en caso de conflictos
+Extensiones Futuras
+Funcionalidades que se pueden agregar sin modificar la estructura base:
+Reportes de rentabilidad: Comparar ingresos vs costos por ítem
+Alertas de stock bajo: Notificaciones cuando un INSUMO llega a un mínimo
+Historial de precios: Tabla adicional para registrar cambios de precios
+Unidades de compra vs venta: Tabla de conversión para comprar en cajas y vender en unidades
+Modificadores/Extras: Tabla adicional para agregar componentes dinámicamente en la venta
+Promociones dinámicas: Motor de reglas para descuentos temporales
+Ventajas de la arquitectura actual:
+Flexibilidad: Se pueden agregar nuevas funcionalidades sin romper lo existente
+Mantenibilidad: La lógica recursiva es reutilizable para múltiples propósitos
+Escalabilidad: Soporta cualquier nivel de complejidad en la composición de productos
+Trazabilidad: Todos los movimientos de stock están registrados y auditables
+

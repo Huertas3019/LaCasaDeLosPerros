@@ -1,3 +1,4 @@
+import 'package:sqflite/sqflite.dart';
 import '../core/database/database_helper.dart';
 import '../models/venta.dart';
 import '../models/venta_detalle.dart';
@@ -23,6 +24,114 @@ class BalancePeriodico {
 class VentasRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
+  // Helper privado para descuento recursivo de stock
+  Future<void> _descontarStockRecursivo(
+    Transaction txn,
+    int itemId,
+    double cantidad, {
+    int depth = 0,
+  }) async {
+    if (depth > 10) return;
+
+    final prodRows = await txn.query(
+      'productos',
+      columns: ['tipo'],
+      where: 'id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+
+    final tipo = prodRows.isNotEmpty ? (prodRows.first['tipo'] as String? ?? 'INSUMO') : 'INSUMO';
+
+    if (tipo == 'INSUMO') {
+      await txn.rawUpdate(
+        'UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?',
+        [cantidad, itemId],
+      );
+      return;
+    }
+
+    final recetas = await txn.query(
+      'recetas',
+      columns: ['insumo_id', 'cantidad_requerida'],
+      where: 'producto_padre_id = ?',
+      whereArgs: [itemId],
+    );
+
+    if (recetas.isEmpty) {
+      await txn.rawUpdate(
+        'UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?',
+        [cantidad, itemId],
+      );
+      return;
+    }
+
+    for (final r in recetas) {
+      final insumoId = r['insumo_id'] as int;
+      final cantReq = (r['cantidad_requerida'] as num).toDouble();
+      await _descontarStockRecursivo(
+        txn,
+        insumoId,
+        cantidad * cantReq,
+        depth: depth + 1,
+      );
+    }
+  }
+
+  // Helper privado para reversión recursiva de stock (al anular)
+  Future<void> _revertirStockRecursivo(
+    Transaction txn,
+    int itemId,
+    double cantidad, {
+    int depth = 0,
+  }) async {
+    if (depth > 10) return;
+
+    final prodRows = await txn.query(
+      'productos',
+      columns: ['tipo'],
+      where: 'id = ?',
+      whereArgs: [itemId],
+      limit: 1,
+    );
+
+    final tipo = prodRows.isNotEmpty ? (prodRows.first['tipo'] as String? ?? 'INSUMO') : 'INSUMO';
+
+    if (tipo == 'INSUMO') {
+      await txn.rawUpdate(
+        'UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?',
+        [cantidad, itemId],
+      );
+      return;
+    }
+
+    final recetas = await txn.query(
+      'recetas',
+      columns: ['insumo_id', 'cantidad_requerida'],
+      where: 'producto_padre_id = ?',
+      whereArgs: [itemId],
+    );
+
+    if (recetas.isEmpty) {
+      await txn.rawUpdate(
+        'UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?',
+        [cantidad, itemId],
+      );
+      return;
+    }
+
+    for (final r in recetas) {
+      final insumoId = r['insumo_id'] as int;
+      final cantReq = (r['cantidad_requerida'] as num).toDouble();
+      await _revertirStockRecursivo(
+        txn,
+        insumoId,
+        cantidad * cantReq,
+        depth: depth + 1,
+      );
+    }
+  }
+
   // Registrar venta con transacción atómica y descuento automático de stock por receta (BOM)
   Future<int> registrarVenta({
     required int turnoId,
@@ -42,17 +151,20 @@ class VentasRepository {
 
       // 1. Calcular costo histórico congelado por cada producto/renglón
       for (var item in items) {
-        // Obtener costo unitario del producto
+        // Obtener costo unitario del producto (preferir costo_calculado_cache si existe)
         final prodMaps = await txn.query(
           'productos',
-          columns: ['precio_costo', 'es_vendible_solo'],
+          columns: ['precio_costo', 'costo_calculado_cache', 'tipo'],
           where: 'id = ?',
           whereArgs: [item.productoId],
         );
 
         double costoUnitarioProd = 0.0;
         if (prodMaps.isNotEmpty) {
-          costoUnitarioProd = (prodMaps.first['precio_costo'] as num).toDouble();
+          final pMap = prodMaps.first;
+          final cache = (pMap['costo_calculado_cache'] as num?)?.toDouble() ?? 0.0;
+          final costoPropio = (pMap['precio_costo'] as num?)?.toDouble() ?? 0.0;
+          costoUnitarioProd = cache > 0.0 ? cache : costoPropio;
         }
 
         double subtotalCostoItem = costoUnitarioProd * item.cantidad;
@@ -78,7 +190,7 @@ class VentasRepository {
         'estado': 'COMPLETADA',
       });
 
-      // 3. Insertar detalles y aplicar descuento de stock por receta
+      // 3. Insertar detalles y aplicar descuento de stock recursivo
       for (var renglon in renglonesAInsertar) {
         renglon['venta_id'] = ventaId;
         await txn.insert('venta_detalles', renglon);
@@ -86,32 +198,11 @@ class VentasRepository {
         int productoId = renglon['producto_id'] as int;
         int cantidadVendida = renglon['cantidad'] as int;
 
-        // Buscar si el producto tiene receta (BOM)
-        final recetas = await txn.query(
-          'recetas',
-          where: 'producto_padre_id = ?',
-          whereArgs: [productoId],
+        await _descontarStockRecursivo(
+          txn,
+          productoId,
+          cantidadVendida.toDouble(),
         );
-
-        if (recetas.isNotEmpty) {
-          // Si tiene receta, descontar del stock de los insumos
-          for (var r in recetas) {
-            int insumoId = r['insumo_id'] as int;
-            double cantidadRequerida = (r['cantidad_requerida'] as num).toDouble();
-            double cantidadTotalADescontar = cantidadRequerida * cantidadVendida;
-
-            await txn.rawUpdate(
-              'UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?',
-              [cantidadTotalADescontar, insumoId],
-            );
-          }
-        } else {
-          // Si no tiene receta (es un producto individual directo sin receta), descontar directamente su stock
-          await txn.rawUpdate(
-            'UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?',
-            [cantidadVendida.toDouble(), productoId],
-          );
-        }
       }
     });
 
@@ -145,26 +236,11 @@ class VentasRepository {
         int productoId = d['producto_id'] as int;
         int cantidadVendida = d['cantidad'] as int;
 
-        // Revertir stock según recetas o directo
-        final recetas = await txn.query('recetas', where: 'producto_padre_id = ?', whereArgs: [productoId]);
-
-        if (recetas.isNotEmpty) {
-          for (var r in recetas) {
-            int insumoId = r['insumo_id'] as int;
-            double cantidadRequerida = (r['cantidad_requerida'] as num).toDouble();
-            double cantidadTotalARevertir = cantidadRequerida * cantidadVendida;
-
-            await txn.rawUpdate(
-              'UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?',
-              [cantidadTotalARevertir, insumoId],
-            );
-          }
-        } else {
-          await txn.rawUpdate(
-            'UPDATE productos SET stock_actual = stock_actual + ? WHERE id = ?',
-            [cantidadVendida.toDouble(), productoId],
-          );
-        }
+        await _revertirStockRecursivo(
+          txn,
+          productoId,
+          cantidadVendida.toDouble(),
+        );
       }
     });
   }

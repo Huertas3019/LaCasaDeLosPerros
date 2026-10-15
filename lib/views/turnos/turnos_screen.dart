@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/events/app_notifier.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/gasto.dart';
 import '../../models/turno.dart';
+import '../../models/venta.dart';
 import '../../repositories/gastos_repository.dart';
 import '../../repositories/turnos_repository.dart';
+import '../../repositories/ventas_repository.dart';
+import '../../widgets/app_widgets.dart';
 
 class TurnosScreen extends StatefulWidget {
   const TurnosScreen({super.key});
@@ -16,10 +20,12 @@ class TurnosScreen extends StatefulWidget {
 class _TurnosScreenState extends State<TurnosScreen> {
   final TurnosRepository _turnosRepo = TurnosRepository();
   final GastosRepository _gastosRepo = GastosRepository();
+  final VentasRepository _ventasRepo = VentasRepository();
 
   Turno? _turnoActivo;
   ResumenTurno? _resumenActivo;
   List<Turno> _historialTurnos = [];
+  List<Venta> _ventasTurno = [];
   bool _isLoading = true;
 
   final NumberFormat _currencyFormat = NumberFormat.currency(locale: 'es_AR', symbol: '\$', decimalDigits: 0);
@@ -28,6 +34,20 @@ class _TurnosScreenState extends State<TurnosScreen> {
   void initState() {
     super.initState();
     _cargarDatos();
+    AppNotifier.instance.addListener(_onAppEvent);
+  }
+
+  @override
+  void dispose() {
+    AppNotifier.instance.removeListener(_onAppEvent);
+    super.dispose();
+  }
+
+  void _onAppEvent() {
+    final e = AppNotifier.instance.lastEventType;
+    if (e == AppEventType.ventaRealizada || e == AppEventType.gastoRegistrado) {
+      _cargarDatos();
+    }
   }
 
   Future<void> _cargarDatos() async {
@@ -35,14 +55,17 @@ class _TurnosScreenState extends State<TurnosScreen> {
     try {
       final turno = await _turnosRepo.getTurnoActivo();
       ResumenTurno? resumen;
+      List<Venta> ventas = [];
       if (turno != null) {
         resumen = await _turnosRepo.obtenerResumenTurno(turno.id!);
+        ventas = await _ventasRepo.getVentasPorTurno(turno.id!);
       }
       final historial = await _turnosRepo.getHistorialTurnos();
 
       setState(() {
         _turnoActivo = turno;
         _resumenActivo = resumen;
+        _ventasTurno = ventas;
         _historialTurnos = historial;
         _isLoading = false;
       });
@@ -97,6 +120,7 @@ class _TurnosScreenState extends State<TurnosScreen> {
                   if (!context.mounted) return;
                   Navigator.pop(context);
                   _cargarDatos();
+                  AppNotifier.instance.notifyTurnoCambiado();
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('¡Turno de caja abierto con éxito!'),
@@ -178,6 +202,7 @@ class _TurnosScreenState extends State<TurnosScreen> {
                 if (!context.mounted) return;
                 Navigator.pop(context);
                 _cargarDatos();
+                AppNotifier.instance.notifyGastoRegistrado();
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -335,6 +360,7 @@ class _TurnosScreenState extends State<TurnosScreen> {
                     if (!context.mounted) return;
                     Navigator.pop(context);
                     _cargarDatos();
+                    AppNotifier.instance.notifyTurnoCambiado();
 
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -348,6 +374,73 @@ class _TurnosScreenState extends State<TurnosScreen> {
               ],
             );
           },
+        );
+      },
+    );
+  }
+
+  void _anularVenta(Venta v) async {
+    final bool confirmar = await AppConfirmDialog.mostrar(
+      context,
+      titulo: 'Anular Venta',
+      mensaje: '¿Estás seguro de anular la venta #${v.id}? Se revertirá el stock de los productos vendidos y se descontará del ingreso del turno.',
+    );
+
+    if (!confirmar) return;
+
+    await _ventasRepo.anularVenta(v.id!);
+    
+    if (!context.mounted) return;
+    _cargarDatos();
+    AppNotifier.instance.notifyVentaRealizada();
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Venta anulada correctamente'), backgroundColor: AppColors.success),
+    );
+  }
+
+  void _verDetalleVenta(Venta v) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Detalle de Venta #${v.id}'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(v.fechaHora))}'),
+                Text('Total: ${_currencyFormat.format(v.totalVenta)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                if (v.esAnulada)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0),
+                    child: Text('ESTADO: ANULADA', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.bold)),
+                  ),
+                const Divider(height: 24),
+                const Text('Productos:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                if (v.detalles != null)
+                  ...v.detalles!.map((d) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${d.cantidad}x ${d.productoNombre ?? "Producto"}'),
+                        Text(_currencyFormat.format(d.subtotal)),
+                      ],
+                    ),
+                  )),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cerrar'),
+            ),
+          ],
         );
       },
     );
@@ -464,6 +557,74 @@ class _TurnosScreenState extends State<TurnosScreen> {
             ),
           ),
           const SizedBox(height: 24),
+
+          if (_turnoActivo != null) ...[
+            const Text(
+              'Ventas del Turno Activo',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            if (_ventasTurno.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No hay ventas registradas en este turno.'),
+                ),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _ventasTurno.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final v = _ventasTurno[index];
+                  return Card(
+                    color: v.esAnulada ? AppColors.error.withValues(alpha: 0.1) : null,
+                    child: ListTile(
+                      leading: Icon(
+                        v.esAnulada ? Icons.cancel : Icons.receipt,
+                        color: v.esAnulada ? AppColors.error : AppColors.primary,
+                      ),
+                      title: Text(
+                        'Venta #${v.id} - ${_currencyFormat.format(v.totalVenta)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          decoration: v.esAnulada ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${DateFormat('HH:mm').format(DateTime.parse(v.fechaHora))} | '
+                        'Efectivo: ${_currencyFormat.format(v.montoEfectivo)} | '
+                        'Transf: ${_currencyFormat.format(v.montoTransferencia)}',
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (v.esAnulada)
+                            const Padding(
+                              padding: EdgeInsets.only(right: 8.0),
+                              child: Text('ANULADA', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.bold, fontSize: 12)),
+                            ),
+                          if (!v.esAnulada)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                              tooltip: 'Anular Venta',
+                              onPressed: () => _anularVenta(v),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.visibility, color: AppColors.primary),
+                            tooltip: 'Ver Detalle',
+                            onPressed: () => _verDetalleVenta(v),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            const SizedBox(height: 24),
+          ],
 
           const Text(
             'Historial de Turnos Anteriores',

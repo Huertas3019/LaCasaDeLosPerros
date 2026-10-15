@@ -15,14 +15,7 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
-
-  final List<Widget> _pages = const [
-    PosScreen(),
-    InventarioScreen(),
-    TurnosScreen(),
-    GastosScreen(),
-    BalanceScreen(),
-  ];
+  final List<Key> _tabKeys = List.generate(5, (_) => UniqueKey());
 
   @override
   Widget build(BuildContext context) {
@@ -58,20 +51,29 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             icon: const Icon(Icons.refresh),
             tooltip: 'Actualizar vista',
             onPressed: () {
-              setState(() {});
+              setState(() {
+                _tabKeys[_currentIndex] = UniqueKey();
+              });
             },
           ),
         ],
       ),
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: [
+          PosScreen(key: _tabKeys[0]),
+          InventarioScreen(key: _tabKeys[1]),
+          TurnosScreen(key: _tabKeys[2]),
+          GastosScreen(key: _tabKeys[3]),
+          BalanceScreen(key: _tabKeys[4]),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
           setState(() {
             _currentIndex = index;
+            _tabKeys[index] = UniqueKey();
           });
         },
         items: const [

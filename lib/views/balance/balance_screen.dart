@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/events/app_notifier.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_utils.dart';
 import '../../repositories/backup_repository.dart';
@@ -24,6 +25,22 @@ class _BalanceScreenState extends State<BalanceScreen> {
   void initState() {
     super.initState();
     _cargarBalance();
+    AppNotifier.instance.addListener(_onAppEvent);
+  }
+
+  @override
+  void dispose() {
+    AppNotifier.instance.removeListener(_onAppEvent);
+    super.dispose();
+  }
+
+  void _onAppEvent() {
+    final e = AppNotifier.instance.lastEventType;
+    if (e == AppEventType.ventaRealizada ||
+        e == AppEventType.gastoRegistrado ||
+        e == AppEventType.turnoCambiado) {
+      _cargarBalance();
+    }
   }
 
   Future<void> _cargarBalance() async {

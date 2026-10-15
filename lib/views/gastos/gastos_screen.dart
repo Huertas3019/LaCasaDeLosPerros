@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/events/app_notifier.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/gasto.dart';
 import '../../models/turno.dart';
@@ -29,6 +30,20 @@ class _GastosScreenState extends State<GastosScreen> {
   void initState() {
     super.initState();
     _cargarDatos();
+    AppNotifier.instance.addListener(_onAppEvent);
+  }
+
+  @override
+  void dispose() {
+    AppNotifier.instance.removeListener(_onAppEvent);
+    super.dispose();
+  }
+
+  void _onAppEvent() {
+    final e = AppNotifier.instance.lastEventType;
+    if (e == AppEventType.turnoCambiado) {
+      _cargarDatos();
+    }
   }
 
   Future<void> _cargarDatos() async {
@@ -52,7 +67,18 @@ class _GastosScreenState extends State<GastosScreen> {
     }
   }
 
-  void _abrirModalNuevoGasto({required bool esGastoTurno}) {
+  void _abrirModalNuevoGasto({required bool esGastoTurno}) async {
+    if (esGastoTurno && _turnoActivo == null) {
+      final turnoActual = await _turnosRepo.getTurnoActivo();
+      if (mounted && turnoActual != null) {
+        setState(() {
+          _turnoActivo = turnoActual;
+        });
+      }
+    }
+
+    if (!mounted) return;
+
     final descCtrl = TextEditingController();
     final montoCtrl = TextEditingController();
     String medioPago = 'EFECTIVO';
@@ -84,6 +110,7 @@ class _GastosScreenState extends State<GastosScreen> {
                 if (!context.mounted) return;
                 Navigator.pop(context);
                 _cargarDatos();
+                AppNotifier.instance.notifyGastoRegistrado();
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(

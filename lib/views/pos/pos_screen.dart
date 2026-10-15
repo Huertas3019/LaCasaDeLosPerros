@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/events/app_notifier.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_utils.dart';
 import '../../models/categoria.dart';
@@ -45,6 +46,20 @@ class _PosScreenState extends State<PosScreen> {
   void initState() {
     super.initState();
     _cargarDatos();
+    AppNotifier.instance.addListener(_onAppEvent);
+  }
+
+  @override
+  void dispose() {
+    AppNotifier.instance.removeListener(_onAppEvent);
+    super.dispose();
+  }
+
+  void _onAppEvent() {
+    final e = AppNotifier.instance.lastEventType;
+    if (e == AppEventType.turnoCambiado) {
+      _cargarDatos();
+    }
   }
 
   Future<void> _cargarDatos() async {
@@ -75,10 +90,35 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  void _agregarAlCarrito(Producto producto) {
+  void _agregarAlCarrito(Producto producto) async {
     if (producto.precioVentaUnitario == null) return;
+    
+    int cantidadEnCarrito = 0;
+    final index = _carrito.indexWhere((item) => item.producto.id == producto.id);
+    if (index >= 0) {
+      cantidadEnCarrito = _carrito[index].cantidad;
+    }
+
+    if (cantidadEnCarrito + 1 > producto.displayStock) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('¡Stock insuficiente para ${producto.nombreConPresentacion}!'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+
+    if (_turnoActivo == null) {
+      final turnoActual = await _turnosRepo.getTurnoActivo();
+      if (mounted && turnoActual != null) {
+        setState(() {
+          _turnoActivo = turnoActual;
+        });
+      }
+    }
+    if (!mounted) return;
     setState(() {
-      final index = _carrito.indexWhere((item) => item.producto.id == producto.id);
       if (index >= 0) {
         _carrito[index].cantidad++;
       } else {
@@ -100,8 +140,17 @@ class _PosScreenState extends State<PosScreen> {
   double get _totalCarrito => _carrito.fold(0.0, (sum, item) => sum + item.subtotal);
   int get totalItems => _carrito.fold(0, (sum, item) => sum + item.cantidad);
 
-  void _abrirModalCobro() {
+  Future<void> _abrirModalCobro() async {
     if (_carrito.isEmpty) return;
+
+    final turnoActual = await _turnosRepo.getTurnoActivo();
+    if (mounted) {
+      setState(() {
+        _turnoActivo = turnoActual;
+      });
+    }
+
+    if (!mounted) return;
     if (_turnoActivo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -309,6 +358,7 @@ class _PosScreenState extends State<PosScreen> {
                           _carrito.clear();
                         });
                         _cargarDatos();
+                        AppNotifier.instance.notifyVentaRealizada();
 
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(

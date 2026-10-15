@@ -20,7 +20,7 @@ class DatabaseHelper {
 
       return await openDatabase(
         path,
-        version: 2,
+        version: 3,
         onConfigure: _onConfigure,
         onCreate: _createDB,
         onUpgrade: _onUpgrade,
@@ -28,7 +28,7 @@ class DatabaseHelper {
     } catch (e) {
       return await openDatabase(
         inMemoryDatabasePath,
-        version: 2,
+        version: 3,
         onConfigure: _onConfigure,
         onCreate: _createDB,
         onUpgrade: _onUpgrade,
@@ -44,6 +44,54 @@ class DatabaseHelper {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE productos ADD COLUMN contenido_neto REAL');
       await db.execute('ALTER TABLE productos ADD COLUMN unidad_contenido TEXT');
+    }
+    if (oldVersion < 3) {
+      await db.execute("ALTER TABLE productos ADD COLUMN tipo TEXT NOT NULL DEFAULT 'INSUMO'");
+      await db.execute("ALTER TABLE productos ADD COLUMN costo_calculado_cache REAL NOT NULL DEFAULT 0.0");
+      await db.execute("ALTER TABLE productos ADD COLUMN unidad_compra TEXT");
+      await db.execute("ALTER TABLE productos ADD COLUMN factor_conversion REAL NOT NULL DEFAULT 1.0");
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS ajustes_inventario (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          insumo_id INTEGER NOT NULL,
+          cantidad REAL NOT NULL,
+          cantidad_ingresada REAL NOT NULL,
+          unidad_ingreso TEXT NOT NULL,
+          factor_conversion_usado REAL NOT NULL DEFAULT 1.0,
+          tipo_ajuste TEXT NOT NULL CHECK (tipo_ajuste IN ('MERMA','ROBO','DONACION','CORRECCION','INGRESO_MANUAL')),
+          costo_unitario_historico REAL NOT NULL DEFAULT 0.0,
+          motivo TEXT,
+          usuario_id INTEGER,
+          fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (insumo_id) REFERENCES productos(id) ON DELETE RESTRICT
+        )
+      ''');
+
+      // Migrar tipificación basada en recetas existentes
+      final padres = await db.rawQuery('SELECT DISTINCT producto_padre_id FROM recetas');
+      final hashSetPadres = padres.map((e) => e['producto_padre_id'] as int).toSet();
+
+      for (final padreId in hashSetPadres) {
+        final hijos = await db.rawQuery(
+          'SELECT insumo_id FROM recetas WHERE producto_padre_id = ?',
+          [padreId],
+        );
+        final hijosIds = hijos.map((e) => e['insumo_id'] as int).toSet();
+
+        final esCombo = hijosIds.any((hijoId) => hashSetPadres.contains(hijoId));
+        final tipo = esCombo ? 'COMBO' : 'PRODUCTO';
+
+        await db.update(
+          'productos',
+          {'tipo': tipo},
+          where: 'id = ?',
+          whereArgs: [padreId],
+        );
+      }
+
+      // Rellenar costo_calculado_cache inicial para insumos
+      await db.execute("UPDATE productos SET costo_calculado_cache = precio_costo WHERE tipo = 'INSUMO'");
     }
   }
 
@@ -64,12 +112,16 @@ class DatabaseHelper {
         categoria_id INTEGER,
         nombre TEXT NOT NULL,
         precio_costo REAL NOT NULL DEFAULT 0.0,
+        costo_calculado_cache REAL NOT NULL DEFAULT 0.0,
         precio_venta_unitario REAL,
         stock_actual REAL NOT NULL DEFAULT 0.0,
         unidad_medida TEXT NOT NULL DEFAULT 'Unidad',
+        unidad_compra TEXT,
+        factor_conversion REAL NOT NULL DEFAULT 1.0,
         contenido_neto REAL,
         unidad_contenido TEXT,
         es_vendible_solo INTEGER NOT NULL DEFAULT 1,
+        tipo TEXT NOT NULL DEFAULT 'INSUMO',
         activo INTEGER NOT NULL DEFAULT 1,
         creado_en TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (categoria_id) REFERENCES categorias(id) ON DELETE SET NULL
@@ -89,7 +141,25 @@ class DatabaseHelper {
       )
     ''');
 
-    // 4. Turnos
+    // 4. Ajustes de Inventario
+    await db.execute('''
+      CREATE TABLE ajustes_inventario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        insumo_id INTEGER NOT NULL,
+        cantidad REAL NOT NULL,
+        cantidad_ingresada REAL NOT NULL,
+        unidad_ingreso TEXT NOT NULL,
+        factor_conversion_usado REAL NOT NULL DEFAULT 1.0,
+        tipo_ajuste TEXT NOT NULL CHECK (tipo_ajuste IN ('MERMA','ROBO','DONACION','CORRECCION','INGRESO_MANUAL')),
+        costo_unitario_historico REAL NOT NULL DEFAULT 0.0,
+        motivo TEXT,
+        usuario_id INTEGER,
+        fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (insumo_id) REFERENCES productos(id) ON DELETE RESTRICT
+      )
+    ''');
+
+    // 5. Turnos
     await db.execute('''
       CREATE TABLE turnos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,7 +177,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 5. Gastos
+    // 6. Gastos
     await db.execute('''
       CREATE TABLE gastos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +191,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 6. Ventas
+    // 7. Ventas
     await db.execute('''
       CREATE TABLE ventas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +206,7 @@ class DatabaseHelper {
       )
     ''');
 
-    // 7. Venta Detalles
+    // 8. Venta Detalles
     await db.execute('''
       CREATE TABLE venta_detalles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,102 +221,27 @@ class DatabaseHelper {
       )
     ''');
 
-    // Cargar datos iniciales de semillas (Categorías por defecto)
+    // Cargar datos iniciales de semillas (o dejar limpio si está configurado)
     await _seedInitialData(db);
   }
 
+  /// Vacía por completo todas las tablas de la base de datos
+  Future<void> vaciarBaseDeDatos() async {
+    final db = await instance.database;
+    await db.transaction((txn) async {
+      await txn.delete('venta_detalles');
+      await txn.delete('ventas');
+      await txn.delete('gastos');
+      await txn.delete('turnos');
+      await txn.delete('ajustes_inventario');
+      await txn.delete('recetas');
+      await txn.delete('productos');
+      await txn.delete('categorias');
+    });
+  }
+
   Future<void> _seedInitialData(Database db) async {
-    final catCombosId = await db.insert('categorias', {'nombre': 'Combos'});
-    final catPanchosId = await db.insert('categorias', {'nombre': 'Panchos'});
-    final catBebidasId = await db.insert('categorias', {'nombre': 'Bebidas'});
-    final catInsumosId = await db.insert('categorias', {'nombre': 'Insumos / Ingredientes'});
-
-    // Insumos base
-    final panId = await db.insert('productos', {
-      'categoria_id': catInsumosId,
-      'nombre': 'Pan de Pancho (Unidad)',
-      'precio_costo': 150.0,
-      'precio_venta_unitario': null,
-      'stock_actual': 100.0,
-      'unidad_medida': 'Unidad',
-      'es_vendible_solo': 0,
-      'activo': 1,
-    });
-
-    final salchichaId = await db.insert('productos', {
-      'categoria_id': catInsumosId,
-      'nombre': 'Salchicha Parrillera (Unidad)',
-      'precio_costo': 300.0,
-      'precio_venta_unitario': null,
-      'stock_actual': 100.0,
-      'unidad_medida': 'Unidad',
-      'es_vendible_solo': 0,
-      'activo': 1,
-    });
-
-    final cocaId = await db.insert('productos', {
-      'categoria_id': catBebidasId,
-      'nombre': 'Coca-Cola 500ml',
-      'precio_costo': 800.0,
-      'precio_venta_unitario': 1800.0,
-      'stock_actual': 50.0,
-      'unidad_medida': 'Unidad',
-      'es_vendible_solo': 1,
-      'activo': 1,
-    });
-
-    // Producto Final / Combo: Super Pancho
-    final superPanchoId = await db.insert('productos', {
-      'categoria_id': catPanchosId,
-      'nombre': 'Super Pancho Especial',
-      'precio_costo': 450.0, // 150 + 300
-      'precio_venta_unitario': 2500.0,
-      'stock_actual': 0.0,
-      'unidad_medida': 'Unidad',
-      'es_vendible_solo': 1,
-      'activo': 1,
-    });
-
-    // Receta para Super Pancho Especial (1 Pan + 1 Salchicha)
-    await db.insert('recetas', {
-      'producto_padre_id': superPanchoId,
-      'insumo_id': panId,
-      'cantidad_requerida': 1.0,
-    });
-    await db.insert('recetas', {
-      'producto_padre_id': superPanchoId,
-      'insumo_id': salchichaId,
-      'cantidad_requerida': 1.0,
-    });
-
-    // Combo 1 (Super Pancho + Coca-Cola)
-    final combo1Id = await db.insert('productos', {
-      'categoria_id': catCombosId,
-      'nombre': 'Combo 1 (Super Pancho + Coca-Cola)',
-      'precio_costo': 1250.0, // 450 + 800
-      'precio_venta_unitario': 3900.0,
-      'stock_actual': 0.0,
-      'unidad_medida': 'Unidad',
-      'es_vendible_solo': 1,
-      'activo': 1,
-    });
-
-    // Receta Combo 1 (1 Pan + 1 Salchicha + 1 Coca-Cola)
-    await db.insert('recetas', {
-      'producto_padre_id': combo1Id,
-      'insumo_id': panId,
-      'cantidad_requerida': 1.0,
-    });
-    await db.insert('recetas', {
-      'producto_padre_id': combo1Id,
-      'insumo_id': salchichaId,
-      'cantidad_requerida': 1.0,
-    });
-    await db.insert('recetas', {
-      'producto_padre_id': combo1Id,
-      'insumo_id': cocaId,
-      'cantidad_requerida': 1.0,
-    });
+    // Las tablas quedan completamente vacías para un inicio limpio en producción.
   }
 
   Future<void> close() async {

@@ -3,7 +3,7 @@ import socketserver
 import os
 import sys
 
-PORT = 8080
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT', 8085))
 DIRECTORY = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'build', 'web')
 
 class Handler(http.server.SimpleHTTPRequestHandler):

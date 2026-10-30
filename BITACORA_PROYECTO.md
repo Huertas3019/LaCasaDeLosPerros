@@ -66,18 +66,25 @@ flutter build web --release
   - Se compiló el paquete web (`flutter build web --release`) y se ajustó `flutter_bootstrap.js` para usar Canvaskit local.
 * **Verificación visual:** Se lanzó Firefox en `http://localhost:8080`, confirmando que la aplicación carga completamente su interfaz oscura con el logo y el módulo de turnos listo.
 
+### 📅 Sesión 2: 30/10/2026
+* **Flexibilización del servidor de desarrollo web:**
+  - Se modificó `tool/serve_web.py` para permitir parametrización dinámica del puerto mediante argumento CLI (`python3 tool/serve_web.py <PUERTO>`) o variable de entorno `PORT`, quedando configurado por defecto en el puerto `8085` para evitar conflictos con otros servicios locales.
+* **Verificación de entorno:**
+  - Confirmación del servidor en ejecución activa en segundo plano en `http://localhost:8085`.
+  - Revisión del árbol de trabajo en la rama `feature/crud-delete-y-mejoras-ui`.
+
 ---
 
-## 🎯 5. Tareas Pendientes para Mañana (Próxima Sesión)
+## 🎯 5. Tareas Pendientes para la Próxima Sesión
 
 1. **Carga y prueba del catálogo gastronómico:**
    - Crear categorías básicas (ej: *Panchos, Bebidas, Combos*).
    - Dar de alta insumos reales (Pan de pancho, Salchichas, Aderezos, Gaseosas).
-   - Crear productos con sus respectivas recetas.
+   - Crear productos con sus respectivas recetas (explosión recursiva de ítems).
    - Probar la apertura de un turno con fondo inicial (ej: \$10.000).
 2. **Prueba de ciclo de ventas completo:**
    - Realizar una venta en efectivo y una con pago mixto (efectivo + transferencia).
    - Comprobar el descuento automático del stock en el módulo de Inventario.
    - Realizar un cierre de turno (arqueo de caja) y verificar que las diferencias y métricas financieras se calculen correctamente.
 3. **Persistencia y Ejecución Nativa de Escritorio:**
-   - Evaluar si se desea utilizar la versión Web o compilar como aplicación nativa de escritorio para Linux (`flutter run -d linux`) para tener almacenamiento persistente directo en disco sin depender del almacenamiento del navegador.
+   - Evaluar si se continúa en versión Web o si se compila como app nativa de escritorio para Linux (`flutter run -d linux`) para almacenamiento persistente directo en disco sin depender de SQLite Wasm en el navegador.
